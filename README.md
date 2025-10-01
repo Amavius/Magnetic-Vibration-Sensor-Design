@@ -11,5 +11,5 @@ a **coil–magnet vibration sensor** with Arduino data acquisition and **FFT-bas
 - Documentation and report
 
 ## Repository Structure
-- `Code/` → Arduino and MATLAB source codes 
-- `Report/` → Full project report (PDF)  
+- `Code` → Arduino and MATLAB source codes 
+- `Report` → Full project report (PDF)  
