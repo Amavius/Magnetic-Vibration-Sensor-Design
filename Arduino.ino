@@ -1,50 +1,72 @@
+#include <Arduino.h>
 #include <TimerOne.h>
-#include <MsTimer2.h>
+#include <string.h>
 
-/******** Constants ********/
-#define ADC_CHANNEL A0
+// -----------------------------------------------------------------------------
+// Sampling configuration
+// -----------------------------------------------------------------------------
+constexpr uint8_t ADC_CHANNEL = A0;
+constexpr uint16_t SAMPLING_FREQ_HZ = 40;          // Samples per second
+constexpr float TOTAL_SAMPLE_TIME_S = 5.0f;        // Capture window in seconds
+constexpr uint16_t NUMBER_OF_SAMPLES =
+    static_cast<uint16_t>(TOTAL_SAMPLE_TIME_S * SAMPLING_FREQ_HZ);
 
+// Shared state between the interrupt service routine and the main loop.
+volatile uint16_t samples[NUMBER_OF_SAMPLES];
+volatile uint16_t samplingCounter = 0;
+volatile bool samplingFinished = false;
 
-// Sampling
-const int SAMPLING_FREQ = 40;
-const float TOTAL_SAMPLE_TIME = 5;
-const int NUMBER_OF_SAMPLES = TOTAL_SAMPLE_TIME*SAMPLING_FREQ;
-
-int SAMPLES[NUMBER_OF_SAMPLES];
-long SAMPLING_COUNTER;
-bool FINISHED=false;
-
-
-void setup () {
-  for (int i = 0 ; i < NUMBER_OF_SAMPLES ; i++) {
-    SAMPLES [i] =- 1;
-  }
-
-  Serial.begin(57600);
-
-
-  Timer1.initialize(1e6/SAMPLING_FREQ);
-  Timer1.attachInterrupt(SAMPLING);
+// -----------------------------------------------------------------------------
+// Utility helpers
+// -----------------------------------------------------------------------------
+void resetSamplingState() {
+  samplingCounter = 0;
+  samplingFinished = false;
 }
 
+void sampleISR();
+
+// -----------------------------------------------------------------------------
+// Arduino entry points
+// -----------------------------------------------------------------------------
+void setup() {
+  Serial.begin(115200);  // Faster upload of captured samples
+
+  resetSamplingState();
+
+  Timer1.initialize(1'000'000UL / SAMPLING_FREQ_HZ);
+  Timer1.attachInterrupt(sampleISR);
+}
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  if (FINISHED) {
-    for (int i = 0 ; i < NUMBER_OF_SAMPLES ; i++) {
-      Serial.println(SAMPLES[i] ) ;
-    }
-    FINISHED=false;
+  if (!samplingFinished) {
+    return;
+  }
+
+  // Copy the captured data while interrupts are disabled to prevent race
+  // conditions when the ISR restarts writing new samples.
+  uint16_t capturedSamples[NUMBER_OF_SAMPLES];
+  uint16_t capturedCount = 0;
+
+  noInterrupts();
+  capturedCount = samplingCounter;
+  memcpy(capturedSamples, (const void*)samples, sizeof(capturedSamples));
+  resetSamplingState();
+  interrupts();
+
+  for (uint16_t i = 0; i < capturedCount; ++i) {
+    Serial.println(capturedSamples[i]);
   }
 }
 
-
-void SAMPLING () {
-if (SAMPLING_COUNTER == NUMBER_OF_SAMPLES) {
-Timer1.detachInterrupt() ;
-FINISHED=true;
-}else {
-SAMPLES [SAMPLING_COUNTER]=analogRead(ADC_CHANNEL);
-SAMPLING_COUNTER++;
-}
+// -----------------------------------------------------------------------------
+// Interrupt service routine
+// -----------------------------------------------------------------------------
+void sampleISR() {
+  if (samplingCounter < NUMBER_OF_SAMPLES) {
+    samples[samplingCounter++] = analogRead(ADC_CHANNEL);
+    if (samplingCounter >= NUMBER_OF_SAMPLES) {
+      samplingFinished = true;
+    }
+  }
 }
